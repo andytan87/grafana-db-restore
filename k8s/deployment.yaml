@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafanadb-restore-api
+  namespace: db-operations
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafanadb-restore-api
+  template:
+    metadata:
+      labels:
+        app: grafanadb-restore-api
+    spec:
+      serviceAccountName: grafanadb-restore-api
+      containers:
+        - name: api
+          image: grafanadb-restore:latest
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: grafanadb-restore-config
+            - secretRef:
+                name: minio-credentials
+                optional: true
+          ports:
+            - containerPort: 8000
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001

@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafanadb-restore-config
+  namespace: db-operations
+data:
+  LOG_LEVEL: INFO
+  RESTORE_IMAGE: postgres:16
+  MAX_BACKUP_LISTING: "200"
+  ALLOWED_BACKUP_EXTENSIONS: .sql,.dump,.backup,.tar
+  # MinIO — set MINIO_BUCKET and MINIO_ENDPOINT_URL to enable MinIO restore sources
+  MINIO_BUCKET: ""
+  MINIO_PREFIX: ""
+  MINIO_ENDPOINT_URL: http://minio.minio.svc.cluster.local:9000
+  MINIO_REGION: us-east-1
+  MINIO_CREDENTIALS_SECRET_NAME: minio-credentials
+  MINIO_MC_IMAGE: minio/mc:latest

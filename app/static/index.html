@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GrafanaDB Restore</title>
+    <link rel="stylesheet" href="/assets/styles.css" />
+</head>
+
+<body>
+    <div class="brand-strip" aria-hidden="true"></div>
+    <main class="layout">
+        <header class="panel">
+            <p class="brand">BA Grafana Self Services</p>
+            <h1>GrafanaDB Restore Portal</h1>
+            <p class="subtitle">Restore PostgreSQL backups from a MinIO bucket.</p>
+            <div class="latest-wrap status-wrap">
+                <p class="hint">API status: <strong id="health-status">Checking...</strong></p>
+                <p class="hint">Kubernetes: <strong id="cluster-status">Checking...</strong></p>
+                <div class="latest-actions">
+                    <button id="refresh-button" type="button" class="ghost">Refresh</button>
+                </div>
+            </div>
+        </header>
+
+        <section class="panel">
+            <form id="restore-form">
+                <label>
+                    Namespace
+                    <select id="namespace" name="namespace"></select>
+                </label>
+
+                <label>
+                    Database secret name
+                    <input id="database-secret-name" name="databaseSecretName" placeholder="grafana-db-credentials"
+                        required />
+                </label>
+
+                <label>
+                    Environment
+                    <select id="source-environment" name="sourceEnvironment">
+                        <option value="prod" selected>prod</option>
+                    </select>
+                </label>
+
+                <label>
+                    Section
+                    <select id="source-section" name="sourceSection">
+                        <option value="default" selected>default</option>
+                        <option value="mws">mws</option>
+                    </select>
+                </label>
+
+                <label>
+                    Backup source
+                    <select id="source-path" name="sourcePath" required></select>
+                </label>
+
+                <label>
+                    Job name prefix
+                    <input id="job-name-prefix" name="jobNamePrefix" value="postgres-restore" />
+                </label>
+
+                <div class="actions">
+                    <button id="submit-button" type="submit">Submit Restore</button>
+                    <button id="validate-button" type="button" class="ghost">Validate</button>
+                </div>
+            </form>
+        </section>
+
+        <section class="panel">
+            <div class="result-head">
+                <h2>Validation</h2>
+            </div>
+            <pre id="validation-output" class="output">No validation run yet.</pre>
+        </section>
+
+        <section class="panel">
+            <div class="result-head">
+                <h2>Latest job</h2>
+            </div>
+            <pre id="job-output" class="output">No job submitted yet.</pre>
+        </section>
+    </main>
+
+    <script type="module" src="/assets/app.js"></script>
+</body>
+
+</html>
