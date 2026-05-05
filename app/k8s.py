@@ -58,15 +58,15 @@ class RestoreService:
     # ------------------------------------------------------------------ source listing
 
     def list_restore_sources(self, prefix: str = "") -> list[RestoreSource]:
-        return self.list_minio_sources(prefix=prefix)
+        return self.list_s3_sources(prefix=prefix)
 
-    def list_minio_sources(self, prefix: str = "") -> list[RestoreSource]:
+    def list_s3_sources(self, prefix: str = "") -> list[RestoreSource]:
         if not self.settings.minio_bucket or not self.settings.minio_endpoint_url:
-            LOGGER.warning("MinIO listing requested but MINIO_BUCKET or MINIO_ENDPOINT_URL is not configured")
+            LOGGER.warning("S3 listing requested but MINIO_BUCKET or MINIO_ENDPOINT_URL is not configured")
             return []
 
-        minio_prefix = self.settings.minio_prefix.rstrip("/")
-        key_prefix = f"{minio_prefix}/{prefix.lstrip('/')}" if minio_prefix else prefix.lstrip("/")
+        bucket_prefix = self.settings.minio_prefix.rstrip("/")
+        key_prefix = f"{bucket_prefix}/{prefix.lstrip('/')}" if bucket_prefix else prefix.lstrip("/")
         allowed_extensions = set(self.settings.allowed_backup_extensions)
 
         boto_kwargs: dict = {
@@ -88,7 +88,7 @@ class RestoreService:
                     suffix = Path(key).suffix
                     if suffix not in allowed_extensions:
                         continue
-                    relative_key = key[len(minio_prefix) + 1 :] if minio_prefix and key.startswith(minio_prefix + "/") else key
+                    relative_key = key[len(bucket_prefix) + 1 :] if bucket_prefix and key.startswith(bucket_prefix + "/") else key
                     results.append(
                         RestoreSource(
                             path=relative_key,
@@ -98,7 +98,7 @@ class RestoreService:
                         )
                     )
         except (BotoCoreError, ClientError) as exc:
-            LOGGER.error("Failed to list MinIO objects: %s", exc)
+            LOGGER.error("Failed to list S3 objects: %s", exc)
 
         results.sort(key=lambda item: item.modified_at, reverse=True)
         return results[: self.settings.max_backup_listing]
@@ -108,9 +108,9 @@ class RestoreService:
     def validate_restore_request(self, restore_request: RestoreJobRequest) -> RestoreValidationResponse:
         errors: list[str] = []
         warnings: list[str] = []
-        return self._validate_minio_request(restore_request, errors, warnings)
+        return self._validate_s3_request(restore_request, errors, warnings)
 
-    def _validate_minio_request(
+    def _validate_s3_request(
         self, restore_request: RestoreJobRequest, errors: list[str], warnings: list[str]
     ) -> RestoreValidationResponse:
         if not self.settings.minio_bucket:
@@ -124,7 +124,7 @@ class RestoreService:
                 f"Unsupported backup extension '{suffix}'. Allowed extensions: {', '.join(self.settings.allowed_backup_extensions)}"
             )
         if not self.settings.minio_credentials_secret_name:
-            errors.append("MINIO_CREDENTIALS_SECRET_NAME must be set so the restore job can authenticate with MinIO")
+            errors.append("MINIO_CREDENTIALS_SECRET_NAME must be set so the restore job can authenticate with S3")
         if not self.kubernetes_connected:
             warnings.append("Kubernetes connectivity is unavailable; restore job submission will fail until cluster access is configured")
 
@@ -140,7 +140,7 @@ class RestoreService:
         if not validation.valid:
             raise ValueError("; ".join(validation.errors))
 
-        return self._submit_minio_restore_job(restore_request)
+        return self._submit_s3_restore_job(restore_request)
 
     # ------------------------------------------------------------------ helpers
 
@@ -187,19 +187,15 @@ esac""".strip()
         timestamp = datetime.now(tz=UTC).strftime("%Y%m%d%H%M%S")
         return f"{prefix}-{timestamp}"[:63]
 
-    def _submit_minio_restore_job(self, restore_request: RestoreJobRequest) -> RestoreJobResponse:
+    def _submit_s3_restore_job(self, restore_request: RestoreJobRequest) -> RestoreJobResponse:
         job_name = self._job_name(restore_request.job_name_prefix)
         creds_secret = self.settings.minio_credentials_secret_name
-        minio_prefix = self.settings.minio_prefix.rstrip("/")
-        full_key = f"{minio_prefix}/{restore_request.source_path.lstrip('/')}" if minio_prefix else restore_request.source_path.lstrip("/")
+        bucket_prefix = self.settings.minio_prefix.rstrip("/")
+        full_key = f"{bucket_prefix}/{restore_request.source_path.lstrip('/')}" if bucket_prefix else restore_request.source_path.lstrip("/")
         local_filename = Path(restore_request.source_path).name
+        quoted_local = shlex.quote(f"/tmp/{local_filename}")
 
-        download_cmd = (
-            'mc alias set restore "$MINIO_ENDPOINT_URL" "$MINIO_ACCESS_KEY" "$MINIO_SECRET_KEY" && '
-            f'mc cp {shlex.quote(f"restore/{self.settings.minio_bucket}/{full_key}")} {shlex.quote(f"/restore/{local_filename}")}'
-        )
-
-        minio_env_vars = [
+        s3_env_vars = [
             client.V1EnvVar(
                 name="MINIO_ACCESS_KEY",
                 value_from=client.V1EnvVarSource(secret_key_ref=client.V1SecretKeySelector(name=creds_secret, key="MINIO_ACCESS_KEY")),
@@ -216,12 +212,17 @@ esac""".strip()
                 ),
             ),
         ]
-        quoted_local = shlex.quote(f"/restore/{local_filename}")
+
+        download_and_restore_cmd = (
+            f'mc alias set src "$MINIO_ENDPOINT_URL" "$MINIO_ACCESS_KEY" "$MINIO_SECRET_KEY" && '
+            f'mc cp {shlex.quote(f"src/{self.settings.minio_bucket}/{full_key}")} {quoted_local} && '
+            f'{self._restore_shell_command(quoted_local)}'
+        )
 
         job = client.V1Job(
             metadata=client.V1ObjectMeta(
                 name=job_name,
-                labels={"app": "grafanadb-restore", "operation": "postgres-restore-minio"},
+                labels={"app": "grafanadb-restore", "operation": "postgres-restore-s3"},
             ),
             spec=client.V1JobSpec(
                 backoff_limit=0,
@@ -233,25 +234,14 @@ esac""".strip()
                     ),
                     spec=client.V1PodSpec(
                         restart_policy="Never",
-                        init_containers=[
-                            client.V1Container(
-                                name="minio-download",
-                                image=self.settings.minio_mc_image,
-                                command=["/bin/sh", "-c", download_cmd],
-                                env=minio_env_vars,
-                                volume_mounts=[client.V1VolumeMount(name="restore-scratch", mount_path="/restore")],
-                            )
-                        ],
                         containers=[
                             client.V1Container(
                                 name="restore",
                                 image=self.settings.restore_image,
-                                command=["/bin/sh", "-c", self._restore_shell_command(quoted_local)],
-                                env=self._pg_env_vars(restore_request.database_secret_name, restore_request.target_database),
-                                volume_mounts=[client.V1VolumeMount(name="restore-scratch", mount_path="/restore")],
+                                command=["/bin/sh", "-c", download_and_restore_cmd],
+                                env=s3_env_vars + self._pg_env_vars(restore_request.database_secret_name, restore_request.target_database),
                             )
                         ],
-                        volumes=[client.V1Volume(name="restore-scratch", empty_dir=client.V1EmptyDirVolumeSource())],
                     ),
                 ),
             ),

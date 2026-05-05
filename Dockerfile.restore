@@ -1,0 +1,16 @@
+FROM opensuse/leap:15.6
+
+ARG MC_VERSION=RELEASE.2024-11-21T17-21-54Z
+
+RUN zypper --non-interactive refresh \
+    && zypper --non-interactive install --no-recommends \
+    postgresql15 \
+    curl \
+    && curl -fsSL "https://dl.min.io/client/mc/release/linux-amd64/archive/mc.${MC_VERSION}" \
+    -o /usr/local/bin/mc \
+    && chmod +x /usr/local/bin/mc \
+    && zypper --non-interactive remove curl \
+    && zypper --non-interactive clean --all
+
+RUN useradd --system --no-create-home --shell /sbin/nologin restore
+USER restore

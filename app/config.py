@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     api_host: str = "0.0.0.0"
     api_port: int = 8000
-    restore_image: str = "postgres:15"
+    restore_image: str = "grafanadb-restore-job:latest"
     max_backup_listing: int = 200
     allowed_backup_extensions: list[str] = Field(default_factory=lambda: [".sql", ".dump", ".backup", ".tar"])
 
@@ -21,7 +21,6 @@ class Settings(BaseSettings):
     minio_endpoint_url: str = "http://192.168.1.123:9000"
     minio_region: str = "us-east-1"
     minio_credentials_secret_name: str = "minio-credentials"
-    minio_mc_image: str = "minio/mc:latest"
     minio_access_key: str = "L7eyFIgYlKRUivfaaXIU"
     minio_secret_key: str = "tmqx8db1ABc3VhCAhj1RBlQBAbDcZGqsSFaksJEV"
 

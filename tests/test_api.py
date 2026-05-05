@@ -94,7 +94,7 @@ def test_restore_submit_minio_endpoint() -> None:
 # ------------------------------------------------------------------ MinIO listing unit tests
 
 @mock_aws
-def test_list_minio_sources() -> None:
+def test_list_s3_sources() -> None:
     bucket = "test-pg-backups"
     original_boto3_client = boto3.client
     original_boto3_client("s3", region_name="us-east-1").create_bucket(Bucket=bucket)
@@ -111,7 +111,7 @@ def test_list_minio_sources() -> None:
     service._batch_api = None
 
     with patch("app.k8s.boto3.client", side_effect=lambda service_name, **kwargs: original_boto3_client(service_name, region_name="us-east-1")):
-        sources = service.list_minio_sources()
+        sources = service.list_s3_sources()
     paths = [s.path for s in sources]
     assert "grafana/2026-04-07.dump" in paths
     assert "grafana/2026-04-06.sql" in paths
@@ -119,7 +119,7 @@ def test_list_minio_sources() -> None:
 
 
 @mock_aws
-def test_list_minio_sources_with_prefix_filter() -> None:
+def test_list_s3_sources_with_prefix_filter() -> None:
     bucket = "test-pg-backups-prefix"
     original_boto3_client = boto3.client
     original_boto3_client("s3", region_name="us-east-1").create_bucket(Bucket=bucket)
@@ -135,7 +135,7 @@ def test_list_minio_sources_with_prefix_filter() -> None:
     service._batch_api = None
 
     with patch("app.k8s.boto3.client", side_effect=lambda service_name, **kwargs: original_boto3_client(service_name, region_name="us-east-1")):
-        sources = service.list_minio_sources(prefix="tenant-a/")
+        sources = service.list_s3_sources(prefix="tenant-a/")
     assert len(sources) == 1
     assert sources[0].path == "tenant-a/2026-04-07.dump"
 
