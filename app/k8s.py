@@ -193,7 +193,8 @@ esac""".strip()
         bucket_prefix = self.settings.minio_prefix.rstrip("/")
         full_key = f"{bucket_prefix}/{restore_request.source_path.lstrip('/')}" if bucket_prefix else restore_request.source_path.lstrip("/")
         local_filename = Path(restore_request.source_path).name
-        quoted_local = shlex.quote(f"/tmp/{local_filename}")
+        local_backup_path = f"/work/{local_filename}"
+        quoted_local = shlex.quote(local_backup_path)
 
         s3_env_vars = [
             client.V1EnvVar(
@@ -213,11 +214,18 @@ esac""".strip()
             ),
         ]
 
-        download_and_restore_cmd = (
+        download_cmd = (
+            'mkdir -p "$MC_CONFIG_DIR" && '
             f'mc alias set src "$MINIO_ENDPOINT_URL" "$MINIO_ACCESS_KEY" "$MINIO_SECRET_KEY" && '
-            f'mc cp {shlex.quote(f"src/{self.settings.minio_bucket}/{full_key}")} {quoted_local} && '
-            f'{self._restore_shell_command(quoted_local)}'
+            f'mc cp {shlex.quote(f"src/{self.settings.minio_bucket}/{full_key}")} {quoted_local}'
         )
+
+        download_env_vars = s3_env_vars + [
+            client.V1EnvVar(name="MC_CONFIG_DIR", value="/work/.mc"),
+            client.V1EnvVar(name="HOME", value="/work"),
+        ]
+
+        restore_cmd = self._restore_shell_command(quoted_local)
 
         job = client.V1Job(
             metadata=client.V1ObjectMeta(
@@ -234,12 +242,28 @@ esac""".strip()
                     ),
                     spec=client.V1PodSpec(
                         restart_policy="Never",
+                        volumes=[
+                            client.V1Volume(
+                                name="restore-workdir",
+                                empty_dir=client.V1EmptyDirVolumeSource(),
+                            )
+                        ],
+                        init_containers=[
+                            client.V1Container(
+                                name="download-backup",
+                                image=self.settings.minio_mc_image,
+                                command=["/bin/sh", "-c", download_cmd],
+                                env=download_env_vars,
+                                volume_mounts=[client.V1VolumeMount(name="restore-workdir", mount_path="/work")],
+                            )
+                        ],
                         containers=[
                             client.V1Container(
                                 name="restore",
                                 image=self.settings.restore_image,
-                                command=["/bin/sh", "-c", download_and_restore_cmd],
-                                env=s3_env_vars + self._pg_env_vars(restore_request.database_secret_name, restore_request.target_database),
+                                command=["/bin/sh", "-c", restore_cmd],
+                                env=self._pg_env_vars(restore_request.database_secret_name, restore_request.target_database),
+                                volume_mounts=[client.V1VolumeMount(name="restore-workdir", mount_path="/work")],
                             )
                         ],
                     ),
