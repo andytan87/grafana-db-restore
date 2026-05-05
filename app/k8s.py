@@ -144,7 +144,7 @@ class RestoreService:
 
     # ------------------------------------------------------------------ helpers
 
-    def _pg_env_vars(self, secret_name: str) -> list[client.V1EnvVar]:
+    def _pg_env_vars(self, secret_name: str, target_database: str) -> list[client.V1EnvVar]:
         return [
             client.V1EnvVar(
                 name="POSTGRES_HOST",
@@ -154,10 +154,7 @@ class RestoreService:
                 name="POSTGRES_PORT",
                 value_from=client.V1EnvVarSource(secret_key_ref=client.V1SecretKeySelector(name=secret_name, key="port")),
             ),
-            client.V1EnvVar(
-                name="POSTGRES_DB",
-                value_from=client.V1EnvVarSource(secret_key_ref=client.V1SecretKeySelector(name=secret_name, key="database")),
-            ),
+            client.V1EnvVar(name="POSTGRES_DB", value=target_database),
             client.V1EnvVar(
                 name="POSTGRES_USER",
                 value_from=client.V1EnvVarSource(secret_key_ref=client.V1SecretKeySelector(name=secret_name, key="username")),
@@ -175,10 +172,10 @@ backup_file={backup_file_expr}
 export PGPASSWORD="$POSTGRES_PASSWORD"
 case "$backup_file" in
   *.sql)
-    psql -v ON_ERROR_STOP=1 -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f "$backup_file"
+    psql -v ON_ERROR_STOP=1 -e -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f "$backup_file"
     ;;
   *.dump|*.backup|*.tar)
-    pg_restore --clean --if-exists --no-owner --no-privileges -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$backup_file"
+    pg_restore --verbose --clean --if-exists --no-owner --no-privileges -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$backup_file"
     ;;
   *)
     echo "Unsupported backup extension: $backup_file"
@@ -225,7 +222,6 @@ esac""".strip()
             metadata=client.V1ObjectMeta(
                 name=job_name,
                 labels={"app": "grafanadb-restore", "operation": "postgres-restore-minio"},
-                annotations=RESTORE_JOB_POD_ANNOTATIONS,
             ),
             spec=client.V1JobSpec(
                 backoff_limit=0,
@@ -251,7 +247,7 @@ esac""".strip()
                                 name="restore",
                                 image=self.settings.restore_image,
                                 command=["/bin/sh", "-c", self._restore_shell_command(quoted_local)],
-                                env=self._pg_env_vars(restore_request.database_secret_name),
+                                env=self._pg_env_vars(restore_request.database_secret_name, restore_request.target_database),
                                 volume_mounts=[client.V1VolumeMount(name="restore-scratch", mount_path="/restore")],
                             )
                         ],
@@ -261,7 +257,6 @@ esac""".strip()
             ),
         )
 
-        assert self._batch_api is not None
         self._batch_api.create_namespaced_job(namespace=restore_request.namespace, body=job)
         return RestoreJobResponse(
             status="submitted",
@@ -282,11 +277,12 @@ esac""".strip()
         if job.status and job.status.conditions:
             conditions = [condition.type for condition in job.status.conditions if condition.type]
 
+        status = job.status
         return JobStatusResponse(
             job_name=job_name,
             namespace=namespace,
-            active=job.status.active or 0,
-            succeeded=job.status.succeeded or 0,
-            failed=job.status.failed or 0,
+            active=(status.active or 0) if status else 0,
+            succeeded=(status.succeeded or 0) if status else 0,
+            failed=(status.failed or 0) if status else 0,
             conditions=conditions,
         )

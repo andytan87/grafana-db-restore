@@ -1,10 +1,9 @@
 const healthStatus = document.querySelector('#health-status');
 const clusterStatus = document.querySelector('#cluster-status');
-const namespaceSelect = document.querySelector('#namespace');
 const sourceSelect = document.querySelector('#source-path');
 const sourceEnvironment = document.querySelector('#source-environment');
 const sourceSection = document.querySelector('#source-section');
-const databaseSecretNameInput = document.querySelector('#database-secret-name');
+const targetDatabaseInput = document.querySelector('#target-database');
 const jobNamePrefixInput = document.querySelector('#job-name-prefix');
 const validationOutput = document.querySelector('#validation-output');
 const jobOutput = document.querySelector('#job-output');
@@ -29,9 +28,10 @@ async function fetchJson(url, options = {}) {
 
 function currentPayload() {
     return {
-        namespace: namespaceSelect.value,
+        namespace: 'mon-metric-grafana',
         source_path: sourceSelect.value,
-        database_secret_name: databaseSecretNameInput.value.trim(),
+        database_secret_name: 'grafana-db-credentials',
+        target_database: targetDatabaseInput.value.trim(),
         job_name_prefix: jobNamePrefixInput.value.trim() || 'postgres-restore',
     };
 }
@@ -39,12 +39,12 @@ function currentPayload() {
 function selectedObjectPrefix() {
     const environment = sourceEnvironment.value;
     const section = sourceSection.value;
-    if (environment == "dev") {
+    if (environment === "dev") {
         return `grafana_${section}_`;
-    } else if (environment == "prod") {
+    } else if (environment === "prod") {
         return `grafana_${environment}_${section}_`;
     }
-
+    return "";
 }
 
 async function loadHealth() {
@@ -53,24 +53,7 @@ async function loadHealth() {
     clusterStatus.textContent = health.kubernetes_connected ? 'Connected' : 'Offline';
 }
 
-async function loadNamespaces() {
-    const namespaces = await fetchJson('/api/namespaces');
-    namespaceSelect.innerHTML = '';
-    if (!namespaces.length) {
-        const option = document.createElement('option');
-        option.value = '';
-        option.textContent = 'No namespaces available';
-        namespaceSelect.appendChild(option);
-        return;
-    }
-
-    for (const namespace of namespaces) {
-        const option = document.createElement('option');
-        option.value = namespace;
-        option.textContent = namespace;
-        namespaceSelect.appendChild(option);
-    }
-}
+async function loadNamespaces() { }
 
 async function loadSources() {
     const prefix = encodeURIComponent(selectedObjectPrefix());
@@ -96,8 +79,12 @@ async function loadSources() {
 }
 
 async function runValidation() {
-    validationOutput.textContent = 'Validating restore request...';
     const payload = currentPayload();
+    if (!payload.target_database) {
+        validationOutput.textContent = 'Target database is required.';
+        return;
+    }
+    validationOutput.textContent = 'Validating restore request...';
     const response = await fetchJson('/api/restore/validate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

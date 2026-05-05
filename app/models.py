@@ -1,6 +1,9 @@
+import re
 from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
+
+_RFC1123_RE = re.compile(r"^[a-z0-9]([a-z0-9\-.]*[a-z0-9])?$")
 
 
 class HealthResponse(BaseModel):
@@ -21,7 +24,15 @@ class RestoreJobRequest(BaseModel):
     namespace: str = Field(min_length=1)
     source_path: str = Field(min_length=1)
     database_secret_name: str = Field(min_length=1)
+    target_database: str = Field(min_length=1)
     job_name_prefix: str = Field(default="postgres-restore", min_length=3, max_length=32)
+
+    @field_validator("database_secret_name", "namespace")
+    @classmethod
+    def validate_k8s_name(cls, value: str) -> str:
+        if not _RFC1123_RE.match(value):
+            raise ValueError(f"'{value}' is not a valid Kubernetes name — use lowercase letters, numbers, and hyphens only (no underscores)")
+        return value
 
     @field_validator("source_path")
     @classmethod

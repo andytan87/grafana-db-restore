@@ -1,19 +1,21 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from functools import lru_cache
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.config import Settings, get_settings
+from app.config import get_settings
 from app.k8s import RestoreService
 from app.models import HealthResponse, JobStatusResponse, RestoreJobRequest, RestoreJobResponse, RestoreSource, RestoreValidationResponse
 
 
-def get_restore_service(settings: Settings = Depends(get_settings)) -> RestoreService:
-    return RestoreService(settings)
+@lru_cache
+def get_restore_service() -> RestoreService:
+    return RestoreService(get_settings())
 
 
 def create_app() -> FastAPI:

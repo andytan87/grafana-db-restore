@@ -83,6 +83,7 @@ def test_restore_submit_minio_endpoint() -> None:
             "namespace": "database",
             "source_path": "2026/04/grafana-2026-04-07.dump",
             "database_secret_name": "grafana-db-credentials",
+            "target_database": "grafana",
         },
     )
     assert response.status_code == 200
@@ -154,6 +155,7 @@ def test_submitted_job_disables_k8tz_injection() -> None:
         namespace="database",
         source_path="grafana_prod_default_2025-07-26-18:21:43.backup",
         database_secret_name="grafana-db-credentials",
+        target_database="grafana",
     )
 
     service.submit_restore_job(request)
@@ -161,6 +163,6 @@ def test_submitted_job_disables_k8tz_injection() -> None:
     create_call = service._batch_api.create_namespaced_job.call_args
     assert create_call is not None
     submitted_job = create_call.kwargs["body"]
-    assert submitted_job.metadata.annotations == RESTORE_JOB_POD_ANNOTATIONS
+    assert submitted_job.metadata.annotations is None
     annotations = submitted_job.spec.template.metadata.annotations
     assert annotations == RESTORE_JOB_POD_ANNOTATIONS
