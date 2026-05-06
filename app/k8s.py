@@ -57,11 +57,36 @@ class RestoreService:
 
     # ------------------------------------------------------------------ source listing
 
-    def list_restore_sources(self, prefix: str = "") -> list[RestoreSource]:
-        return self.list_s3_sources(prefix=prefix)
+    def _resolve_bucket_name(self, environment: str | None = None, namespace: str | None = None) -> str:
+        environment_value = (environment or "").strip().lower()
+        if environment_value == "prod" and self.settings.minio_bucket_prod:
+            return self.settings.minio_bucket_prod
+        if environment_value == "dev" and self.settings.minio_bucket_dev:
+            return self.settings.minio_bucket_dev
 
-    def list_s3_sources(self, prefix: str = "") -> list[RestoreSource]:
-        if not self.settings.minio_bucket or not self.settings.minio_endpoint_url:
+        namespace_value = (namespace or "").lower()
+        if "prod" in namespace_value and self.settings.minio_bucket_prod:
+            return self.settings.minio_bucket_prod
+        if "dev" in namespace_value and self.settings.minio_bucket_dev:
+            return self.settings.minio_bucket_dev
+        if self.settings.minio_bucket:
+            return self.settings.minio_bucket
+        if self.settings.minio_bucket_prod:
+            return self.settings.minio_bucket_prod
+        if self.settings.minio_bucket_dev:
+            return self.settings.minio_bucket_dev
+        return ""
+
+    def list_restore_sources(
+        self, prefix: str = "", environment: str | None = None, namespace: str | None = None
+    ) -> list[RestoreSource]:
+        return self.list_s3_sources(prefix=prefix, environment=environment, namespace=namespace)
+
+    def list_s3_sources(
+        self, prefix: str = "", environment: str | None = None, namespace: str | None = None
+    ) -> list[RestoreSource]:
+        bucket_name = self._resolve_bucket_name(environment=environment, namespace=namespace)
+        if not bucket_name or not self.settings.minio_endpoint_url:
             LOGGER.warning("S3 listing requested but MINIO_BUCKET or MINIO_ENDPOINT_URL is not configured")
             return []
 
@@ -82,7 +107,7 @@ class RestoreService:
         try:
             s3 = boto3.client("s3", **boto_kwargs)
             paginator = s3.get_paginator("list_objects_v2")
-            for page in paginator.paginate(Bucket=self.settings.minio_bucket, Prefix=key_prefix):
+            for page in paginator.paginate(Bucket=bucket_name, Prefix=key_prefix):
                 for obj in page.get("Contents", []):
                     key: str = obj["Key"]
                     suffix = Path(key).suffix
@@ -113,8 +138,8 @@ class RestoreService:
     def _validate_s3_request(
         self, restore_request: RestoreJobRequest, errors: list[str], warnings: list[str]
     ) -> RestoreValidationResponse:
-        if not self.settings.minio_bucket:
-            errors.append("MINIO_BUCKET must be configured before submitting a MinIO restore job")
+        if not self._resolve_bucket_name(environment=restore_request.environment, namespace=restore_request.namespace):
+            errors.append("Configure MINIO_BUCKET_DEV and/or MINIO_BUCKET_PROD (or MINIO_BUCKET fallback) before submitting a MinIO restore job")
         if not self.settings.minio_endpoint_url:
             errors.append("MINIO_ENDPOINT_URL must be configured before submitting a MinIO restore job")
 
@@ -188,6 +213,7 @@ esac""".strip()
         return f"{prefix}-{timestamp}"[:63]
 
     def _submit_s3_restore_job(self, restore_request: RestoreJobRequest) -> RestoreJobResponse:
+        bucket_name = self._resolve_bucket_name(environment=restore_request.environment, namespace=restore_request.namespace)
         job_name = self._job_name(restore_request.job_name_prefix)
         creds_secret = self.settings.minio_credentials_secret_name
         bucket_prefix = self.settings.minio_prefix.rstrip("/")
@@ -217,7 +243,7 @@ esac""".strip()
         download_cmd = (
             'mkdir -p "$MC_CONFIG_DIR" && '
             f'mc alias set src "$MINIO_ENDPOINT_URL" "$MINIO_ACCESS_KEY" "$MINIO_SECRET_KEY" && '
-            f'mc cp {shlex.quote(f"src/{self.settings.minio_bucket}/{full_key}")} {quoted_local}'
+            f'mc cp {shlex.quote(f"src/{bucket_name}/{full_key}")} {quoted_local}'
         )
 
         download_env_vars = s3_env_vars + [

@@ -57,7 +57,7 @@ A FastAPI-based Kubernetes deployment with an operator-facing web UI for restori
   - `password`
 - Python 3.13+ for local development
 
-The API deployment needs a `minio-credentials` secret with `MINIO_ACCESS_KEY` and `MINIO_SECRET_KEY`, and the config map must point `MINIO_ENDPOINT_URL` at the MinIO service.
+The API deployment needs a `minio-credentials` secret with `MINIO_ACCESS_KEY` and `MINIO_SECRET_KEY`, and the config map must point `MINIO_ENDPOINT_URL` at the MinIO service. For environment separation, configure `MINIO_BUCKET_DEV=grafana-backup-dev` and `MINIO_BUCKET_PROD=grafana-backup-prod`.
 
 ## Local Development
 
@@ -76,7 +76,7 @@ If Kubernetes connectivity is not available locally, the API still serves the UI
 
 - `GET /health`
 - `GET /api/namespaces`
-- `GET /api/restore-sources?prefix=...`
+- `GET /api/restore-sources?prefix=...&namespace=...`
 - `POST /api/restore/validate`
 - `POST /api/restore`
 - `GET /api/jobs/{namespace}/{job_name}`
@@ -97,3 +97,9 @@ kubectl apply -f k8s/deployment.yaml
 ```bash
 pytest
 ```
+
+## Bucket Selection Rules
+
+- If namespace contains `prod`, the API uses `MINIO_BUCKET_PROD`.
+- If namespace contains `dev`, the API uses `MINIO_BUCKET_DEV`.
+- Otherwise, the API falls back to `MINIO_BUCKET`, then to whichever of `MINIO_BUCKET_DEV` or `MINIO_BUCKET_PROD` is configured.

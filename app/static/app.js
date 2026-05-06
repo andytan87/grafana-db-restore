@@ -12,6 +12,15 @@ const refreshButton = document.querySelector('#refresh-button');
 const validateButton = document.querySelector('#validate-button');
 
 let latestJob = null;
+const BACKUP_NAME_PATTERNS = [
+    /^grafana_(.+)-(\d{4}\.\d{2}\.\d{2})-.+\.backup$/,
+    /^grafana_(.+)_(\d{4}-\d{2}-\d{2})[-_].+\.backup$/,
+];
+
+const ENVIRONMENT_NAMESPACES = {
+    dev: 'mon-metric-grafana',
+    prod: 'mon-metric-grafana',
+};
 
 function formatJson(value) {
     return JSON.stringify(value, null, 2);
@@ -27,8 +36,12 @@ async function fetchJson(url, options = {}) {
 }
 
 function currentPayload() {
+    const environment = sourceEnvironment.value;
+    const namespace = ENVIRONMENT_NAMESPACES[environment] || ENVIRONMENT_NAMESPACES.prod;
+
     return {
-        namespace: 'mon-metric-grafana',
+        namespace,
+        environment,
         source_path: sourceSelect.value,
         database_secret_name: 'grafana-db-credentials',
         target_database: targetDatabaseInput.value.trim(),
@@ -36,15 +49,78 @@ function currentPayload() {
     };
 }
 
-function selectedObjectPrefix() {
-    const environment = sourceEnvironment.value;
-    const section = sourceSection.value;
-    if (environment === "dev") {
-        return `grafana_${section}_`;
-    } else if (environment === "prod") {
-        return `grafana_${environment}_${section}_`;
+function parseBackupMetadata(path) {
+    const fileName = path.split('/').pop() || path;
+    let middle = null;
+
+    for (const pattern of BACKUP_NAME_PATTERNS) {
+        const match = fileName.match(pattern);
+        if (match) {
+            middle = (match[1] || '').trim();
+            break;
+        }
     }
-    return "";
+
+    if (!middle) {
+        return null;
+    }
+
+    const parts = middle.split('_').filter(Boolean);
+    if (!parts.length) {
+        return null;
+    }
+
+    const section = (parts[0] === 'dev' || parts[0] === 'prod') ? parts[1] : parts[0];
+    if (!section) {
+        return null;
+    }
+
+    return { fileName, section };
+}
+
+function parseMatchingBackups(sources) {
+    return sources
+        .map((source) => {
+            const metadata = parseBackupMetadata(source.path);
+            return metadata ? { source, metadata } : null;
+        })
+        .filter(Boolean);
+}
+
+function populateSectionOptions(parsedBackups) {
+    const sections = [...new Set(parsedBackups.map((entry) => entry.metadata.section))].sort();
+    const currentSection = sourceSection.value;
+
+    sourceSection.innerHTML = '';
+    for (const section of sections) {
+        const option = document.createElement('option');
+        option.value = section;
+        option.textContent = section;
+        if (section === currentSection) {
+            option.selected = true;
+        }
+        sourceSection.appendChild(option);
+    }
+
+    if (sections.length && !sections.includes(currentSection)) {
+        sourceSection.value = sections[0];
+    }
+}
+
+function filterSourcesBySection(parsedBackups) {
+    if (!parsedBackups.length) {
+        return [];
+    }
+
+    const section = sourceSection.value;
+    if (!section) {
+        return parsedBackups.map((entry) => entry.source);
+    }
+
+    const filtered = parsedBackups.filter((entry) => {
+        return entry.metadata.section === section;
+    });
+    return filtered.length ? filtered.map((entry) => entry.source) : parsedBackups.map((entry) => entry.source);
 }
 
 async function loadHealth() {
@@ -56,18 +132,22 @@ async function loadHealth() {
 async function loadNamespaces() { }
 
 async function loadSources() {
-    const prefix = encodeURIComponent(selectedObjectPrefix());
-    const sources = await fetchJson(`/api/restore-sources?prefix=${prefix}`);
+    const environment = sourceEnvironment.value;
+    const namespace = encodeURIComponent(ENVIRONMENT_NAMESPACES[environment] || environment);
+    const sources = await fetchJson(`/api/restore-sources?environment=${encodeURIComponent(environment)}&namespace=${namespace}`);
+    const parsedBackups = parseMatchingBackups(sources);
+    populateSectionOptions(parsedBackups);
+    const displayedSources = filterSourcesBySection(parsedBackups);
     sourceSelect.innerHTML = '';
-    if (!sources.length) {
+    if (!displayedSources.length) {
         const option = document.createElement('option');
         option.value = '';
-        option.textContent = 'No MinIO objects found (check bucket, endpoint, or prefix config)';
+        option.textContent = 'No backups found matching pattern grafana_(section)-YYYY.MM.DD-...backup';
         sourceSelect.appendChild(option);
         return;
     }
 
-    for (const source of sources) {
+    for (const source of displayedSources) {
         const option = document.createElement('option');
         option.value = source.path;
         const sizeLabel = source.size_bytes < 1024

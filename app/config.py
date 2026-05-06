@@ -15,8 +15,9 @@ class Settings(BaseSettings):
     max_backup_listing: int = 200
     allowed_backup_extensions: list[str] = Field(default_factory=lambda: [".sql", ".dump", ".backup", ".tar"])
 
-    # MinIO
-    minio_bucket: str = "elkintranet-nonprod-monitoring"
+    minio_bucket: str = ""
+    minio_bucket_dev: str = "elkintranet-nonprod-monitoring"
+    minio_bucket_prod: str = "grafana-backup-prod"
     minio_prefix: str = ""
     minio_endpoint_url: str = "http://192.168.1.123:9000"
     minio_region: str = "us-east-1"

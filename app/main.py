@@ -47,9 +47,11 @@ def create_app() -> FastAPI:
     @application.get("/api/restore-sources", response_model=list[RestoreSource])
     async def list_restore_sources(
         prefix: str = Query(default="", description="Optional object key prefix under the configured MinIO bucket"),
+        environment: str | None = Query(default=None, description="Optional environment override (`dev` or `prod`) for bucket selection"),
+        namespace: str | None = Query(default=None, description="Optional namespace used to resolve the MinIO bucket (dev/prod)"),
         service: RestoreService = Depends(get_restore_service),
     ) -> list[RestoreSource]:
-        return service.list_restore_sources(prefix=prefix)
+        return service.list_restore_sources(prefix=prefix, environment=environment, namespace=namespace)
 
     @application.post("/api/restore/validate", response_model=RestoreValidationResponse)
     async def validate_restore(

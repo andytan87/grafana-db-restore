@@ -1,5 +1,6 @@
 import re
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -22,6 +23,7 @@ class RestoreSource(BaseModel):
 
 class RestoreJobRequest(BaseModel):
     namespace: str = Field(min_length=1)
+    environment: Literal["dev", "prod"] = "prod"
     source_path: str = Field(min_length=1)
     database_secret_name: str = Field(min_length=1)
     target_database: str = Field(min_length=1)

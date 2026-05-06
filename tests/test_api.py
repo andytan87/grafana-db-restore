@@ -18,7 +18,9 @@ class FakeRestoreService:
     def list_namespaces(self) -> list[str]:
         return ["database", "grafana"]
 
-    def list_restore_sources(self, prefix: str = "") -> list[RestoreSource]:
+    def list_restore_sources(
+        self, prefix: str = "", environment: str | None = None, namespace: str | None = None
+    ) -> list[RestoreSource]:
         base = [
             RestoreSource(
                 path="daily/grafana-2026-04-07.dump",
@@ -81,6 +83,7 @@ def test_restore_submit_minio_endpoint() -> None:
         "/api/restore",
         json={
             "namespace": "database",
+            "environment": "prod",
             "source_path": "2026/04/grafana-2026-04-07.dump",
             "database_secret_name": "grafana-db-credentials",
             "target_database": "grafana",
@@ -153,6 +156,7 @@ def test_submitted_job_disables_k8tz_injection() -> None:
 
     request = RestoreJobRequest(
         namespace="database",
+        environment="prod",
         source_path="grafana_prod_default_2025-07-26-18:21:43.backup",
         database_secret_name="grafana-db-credentials",
         target_database="grafana",
@@ -166,3 +170,86 @@ def test_submitted_job_disables_k8tz_injection() -> None:
     assert submitted_job.metadata.annotations is None
     annotations = submitted_job.spec.template.metadata.annotations
     assert annotations == RESTORE_JOB_POD_ANNOTATIONS
+
+
+def test_resolve_bucket_name_prefers_namespace_mapping() -> None:
+    service = RestoreService.__new__(RestoreService)
+    service.settings = Settings(
+        minio_bucket="fallback-bucket",
+        minio_bucket_dev="grafana-backup-dev",
+        minio_bucket_prod="grafana-backup-prod",
+        minio_endpoint_url="http://minio:9000",
+        minio_credentials_secret_name="minio-credentials",
+    )
+    service._kubernetes_connected = False
+    service._core_api = None
+    service._batch_api = None
+
+    assert service._resolve_bucket_name(namespace="team-dev") == "grafana-backup-dev"
+    assert service._resolve_bucket_name(namespace="team-prod") == "grafana-backup-prod"
+    assert service._resolve_bucket_name(namespace="shared") == "fallback-bucket"
+
+
+def test_resolve_bucket_name_defaults_to_prod_when_unqualified() -> None:
+    service = RestoreService.__new__(RestoreService)
+    service.settings = Settings(
+        minio_bucket="",
+        minio_bucket_dev="elkintranet-nonprod-monitoring",
+        minio_bucket_prod="grafana-backup-prod",
+        minio_endpoint_url="http://minio:9000",
+        minio_credentials_secret_name="minio-credentials",
+    )
+    service._kubernetes_connected = False
+    service._core_api = None
+    service._batch_api = None
+
+    assert service._resolve_bucket_name(namespace="mon-metric-grafana") == "grafana-backup-prod"
+
+
+def test_resolve_bucket_name_prefers_explicit_environment() -> None:
+    service = RestoreService.__new__(RestoreService)
+    service.settings = Settings(
+        minio_bucket="fallback-bucket",
+        minio_bucket_dev="elkintranet-nonprod-monitoring",
+        minio_bucket_prod="grafana-backup-prod",
+        minio_endpoint_url="http://minio:9000",
+        minio_credentials_secret_name="minio-credentials",
+    )
+    service._kubernetes_connected = False
+    service._core_api = None
+    service._batch_api = None
+
+    assert service._resolve_bucket_name(environment="dev", namespace="mon-metric-grafana") == "elkintranet-nonprod-monitoring"
+    assert service._resolve_bucket_name(environment="prod", namespace="mon-metric-grafana") == "grafana-backup-prod"
+
+
+def test_submit_restore_job_uses_environment_bucket() -> None:
+    service = RestoreService.__new__(RestoreService)
+    service.settings = Settings(
+        minio_bucket="fallback-bucket",
+        minio_bucket_dev="grafana-backup-dev",
+        minio_bucket_prod="grafana-backup-prod",
+        minio_endpoint_url="http://minio:9000",
+        minio_credentials_secret_name="minio-credentials",
+        minio_mc_image="minio/mc:latest",
+    )
+    service._kubernetes_connected = True
+    service._core_api = None
+    service._batch_api = MagicMock()
+
+    request = RestoreJobRequest(
+        namespace="mon-metric-grafana",
+        environment="prod",
+        source_path="grafana_prod_default_2025-07-26-18:21:43.backup",
+        database_secret_name="grafana-db-credentials",
+        target_database="grafana",
+    )
+
+    service.submit_restore_job(request)
+
+    create_call = service._batch_api.create_namespaced_job.call_args
+    assert create_call is not None
+    submitted_job = create_call.kwargs["body"]
+    init_container = submitted_job.spec.template.spec.init_containers[0]
+    command = " ".join(init_container.command)
+    assert "src/grafana-backup-prod/" in command
