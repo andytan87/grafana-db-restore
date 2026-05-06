@@ -58,23 +58,15 @@ class RestoreService:
     # ------------------------------------------------------------------ source listing
 
     def _resolve_bucket_name(self, environment: str | None = None, namespace: str | None = None) -> str:
-        environment_value = (environment or "").strip().lower()
-        if environment_value == "prod" and self.settings.minio_bucket_prod:
-            return self.settings.minio_bucket_prod
-        if environment_value == "dev" and self.settings.minio_bucket_dev:
-            return self.settings.minio_bucket_dev
+        return self.settings.minio_bucket.strip()
 
-        namespace_value = (namespace or "").lower()
-        if "prod" in namespace_value and self.settings.minio_bucket_prod:
-            return self.settings.minio_bucket_prod
-        if "dev" in namespace_value and self.settings.minio_bucket_dev:
-            return self.settings.minio_bucket_dev
-        if self.settings.minio_bucket:
-            return self.settings.minio_bucket
-        if self.settings.minio_bucket_prod:
-            return self.settings.minio_bucket_prod
-        if self.settings.minio_bucket_dev:
-            return self.settings.minio_bucket_dev
+    def _resolve_bucket_prefix(self, environment: str | None = None, namespace: str | None = None) -> str:
+        environment_value = (environment or "").strip().lower()
+        if environment_value == "dev":
+            return self.settings.minio_prefix_dev.strip("/")
+        if environment_value == "prod":
+            return self.settings.minio_prefix_prod.strip("/")
+
         return ""
 
     def list_restore_sources(
@@ -90,7 +82,7 @@ class RestoreService:
             LOGGER.warning("S3 listing requested but MINIO_BUCKET or MINIO_ENDPOINT_URL is not configured")
             return []
 
-        bucket_prefix = self.settings.minio_prefix.rstrip("/")
+        bucket_prefix = self._resolve_bucket_prefix(environment=environment, namespace=namespace)
         key_prefix = f"{bucket_prefix}/{prefix.lstrip('/')}" if bucket_prefix else prefix.lstrip("/")
         allowed_extensions = set(self.settings.allowed_backup_extensions)
 
@@ -139,7 +131,7 @@ class RestoreService:
         self, restore_request: RestoreJobRequest, errors: list[str], warnings: list[str]
     ) -> RestoreValidationResponse:
         if not self._resolve_bucket_name(environment=restore_request.environment, namespace=restore_request.namespace):
-            errors.append("Configure MINIO_BUCKET_DEV and/or MINIO_BUCKET_PROD (or MINIO_BUCKET fallback) before submitting a MinIO restore job")
+            errors.append("Configure MINIO_BUCKET before submitting a MinIO restore job")
         if not self.settings.minio_endpoint_url:
             errors.append("MINIO_ENDPOINT_URL must be configured before submitting a MinIO restore job")
 
@@ -216,7 +208,7 @@ esac""".strip()
         bucket_name = self._resolve_bucket_name(environment=restore_request.environment, namespace=restore_request.namespace)
         job_name = self._job_name(restore_request.job_name_prefix)
         creds_secret = self.settings.minio_credentials_secret_name
-        bucket_prefix = self.settings.minio_prefix.rstrip("/")
+        bucket_prefix = self._resolve_bucket_prefix(environment=restore_request.environment, namespace=restore_request.namespace)
         full_key = f"{bucket_prefix}/{restore_request.source_path.lstrip('/')}" if bucket_prefix else restore_request.source_path.lstrip("/")
         local_filename = Path(restore_request.source_path).name
         local_backup_path = f"/work/{local_filename}"

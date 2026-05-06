@@ -8,11 +8,11 @@ data:
   RESTORE_IMAGE: postgres:16
   MAX_BACKUP_LISTING: "200"
   ALLOWED_BACKUP_EXTENSIONS: .sql,.dump,.backup,.tar
-  # MinIO — set env-specific buckets and endpoint to enable MinIO restore sources
-  MINIO_BUCKET: ""
-  MINIO_BUCKET_DEV: grafana-backup-dev
-  MINIO_BUCKET_PROD: grafana-backup-prod
+  # MinIO — use one shared bucket for all environments
+  MINIO_BUCKET: elkintranet-nonprod-monitoring
   MINIO_PREFIX: ""
+  MINIO_PREFIX_DEV: grafana-backup-dev
+  MINIO_PREFIX_PROD: grafana-backup-prod
   MINIO_ENDPOINT_URL: http://minio.minio.svc.cluster.local:9000
   MINIO_REGION: us-east-1
   MINIO_CREDENTIALS_SECRET_NAME: minio-credentials

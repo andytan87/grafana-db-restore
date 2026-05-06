@@ -57,7 +57,7 @@ A FastAPI-based Kubernetes deployment with an operator-facing web UI for restori
   - `password`
 - Python 3.13+ for local development
 
-The API deployment needs a `minio-credentials` secret with `MINIO_ACCESS_KEY` and `MINIO_SECRET_KEY`, and the config map must point `MINIO_ENDPOINT_URL` at the MinIO service. For environment separation, configure `MINIO_BUCKET_DEV=grafana-backup-dev` and `MINIO_BUCKET_PROD=grafana-backup-prod`.
+The API deployment needs a `minio-credentials` secret with `MINIO_ACCESS_KEY` and `MINIO_SECRET_KEY`, and the config map must point `MINIO_ENDPOINT_URL` at the MinIO service. Use a single bucket via `MINIO_BUCKET` (for example `elkintranet-nonprod-monitoring`) for both environments.
 
 ## Local Development
 
@@ -100,6 +100,11 @@ pytest
 
 ## Bucket Selection Rules
 
-- If namespace contains `prod`, the API uses `MINIO_BUCKET_PROD`.
-- If namespace contains `dev`, the API uses `MINIO_BUCKET_DEV`.
-- Otherwise, the API falls back to `MINIO_BUCKET`, then to whichever of `MINIO_BUCKET_DEV` or `MINIO_BUCKET_PROD` is configured.
+- The API uses `MINIO_BUCKET` for all environments.
+- For `dev`, the API reads/writes under `MINIO_BUCKET/MINIO_PREFIX_DEV`.
+- For `prod`, the API reads/writes under `MINIO_BUCKET/MINIO_PREFIX_PROD`.
+
+Example:
+
+- `dev` -> `elkintranet-nonprod-monitoring/grafana-backup-dev`
+- `prod` -> `elkintranet-nonprod-monitoring/grafana-backup-prod`
